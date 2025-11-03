@@ -5,7 +5,10 @@ import { FiPlus, FiX, FiHome, FiDollarSign, FiUsers, FiLayers, FiEdit2, FiTrash2
 import { FaBroom, FaDoorOpen, FaWrench } from 'react-icons/fa';
 
 // Configuration - Remove /api from the base URL since your server.js doesn't have it
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://hotel-management-backend-4hff.onrender.com';
+
+
+
 
 const RoomsPage = () => {
   const [rooms, setRooms] = useState([]);
