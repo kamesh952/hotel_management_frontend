@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 // Configuration
-const API_BASE_URL = "http://localhost:5000";
+const API_BASE_URL = "https://hotel-management-backend-4hff.onrender.com";
 
 const AuthPage = ({ setToken, isLogin }) => {
   const [formData, setFormData] = useState({
