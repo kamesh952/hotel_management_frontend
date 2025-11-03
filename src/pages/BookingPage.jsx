@@ -20,7 +20,7 @@ import {
   AlertCircle
 } from "lucide-react";
 
-const API_BASE_URL = "http://localhost:5000";
+const API_BASE_URL = "https://hotel-management-backend-4hff.onrender.com";
 
 const BookingsPage = () => {
   const [bookings, setBookings] = useState([]);
