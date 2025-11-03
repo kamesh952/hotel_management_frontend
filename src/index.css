@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Parisienne&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* index.css or App.css */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+[contenteditable="true"] {
+  pointer-events: none;
+}
+
+* {
+  user-select: none;
+}
+
+body {
+    font-family: 'Outfit', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* If you want to apply it to specific Ant Design components */
+.ant-menu, .ant-btn, .ant-input, .ant-typography {
+  font-family: 'Outfit', sans-serif !important;
+}
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+}
