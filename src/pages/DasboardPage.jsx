@@ -21,7 +21,7 @@ import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, registerables } from 'chart.js';
 
 // Configuration
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://hotel-management-backend-4hff.onrender.com';
 
 // Register ChartJS components
 ChartJS.register(...registerables);
