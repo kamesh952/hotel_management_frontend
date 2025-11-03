@@ -19,7 +19,7 @@ import {
 } from 'react-icons/fi';
 
 // Configuration
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'https://hotel-management-backend-4hff.onrender.com';
 
 const GuestsPage = () => {
   const [guests, setGuests] = useState([]);
