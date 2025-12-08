@@ -279,13 +279,7 @@ const Sidebar = ({ isOpen, onToggle, onLogout }) => {
                     My Profile
                   </button>
                   
-                  <button
-                    onClick={handleSettingsClick}
-                    className="flex items-center w-full px-3 py-3 text-sm text-gray-300 hover:text-white hover:bg-gray-700/50 rounded-lg transition-all duration-200 group"
-                  >
-                    <HiCog className="w-4 h-4 mr-3 text-gray-400 group-hover:text-purple-400 transition-colors" />
-                    Settings
-                  </button>
+                
                 </div>
               </div>
             )}

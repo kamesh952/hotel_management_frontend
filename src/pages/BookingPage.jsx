@@ -46,7 +46,8 @@ const BookingsPage = () => {
     checkOut: "",
     adults: 1,
     children: 0,
-    specialRequests: []
+    specialRequests: [],
+    totalPrice: 0
   });
   const [validationErrors, setValidationErrors] = useState({});
   const [newSpecialRequest, setNewSpecialRequest] = useState("");
@@ -55,10 +56,20 @@ const BookingsPage = () => {
     fetchData();
   }, [currentPage, filterStatus]);
 
+  const getAuthToken = () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("No authentication token found. Please log in.");
+      return null;
+    }
+    return token;
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
       
       const params = new URLSearchParams();
       if (filterStatus) params.append('status', filterStatus);
@@ -77,9 +88,9 @@ const BookingsPage = () => {
         })
       ]);
 
-      if (!bookingsRes.ok) throw new Error(`Failed to fetch bookings: ${bookingsRes.status}`);
-      if (!roomsRes.ok) throw new Error(`Failed to fetch rooms: ${roomsRes.status}`);
-      if (!guestsRes.ok) throw new Error(`Failed to fetch guests: ${guestsRes.status}`);
+      if (!bookingsRes.ok) throw new Error(`Failed to fetch bookings: ${bookingsRes.statusText}`);
+      if (!roomsRes.ok) throw new Error(`Failed to fetch rooms: ${roomsRes.statusText}`);
+      if (!guestsRes.ok) throw new Error(`Failed to fetch guests: ${guestsRes.statusText}`);
 
       const bookingsData = await bookingsRes.json();
       const roomsData = await roomsRes.json();
@@ -87,8 +98,8 @@ const BookingsPage = () => {
 
       setBookings(bookingsData.bookings || []);
       setTotalPages(bookingsData.totalPages || 1);
-      setRooms(roomsData);
-      setGuests(guestsData.guests || []);
+      setRooms(roomsData || []);
+      setGuests(guestsData.guests || guestsData || []);
       setError("");
     } catch (err) {
       setError(err.message || "Failed to load data");
@@ -100,30 +111,50 @@ const BookingsPage = () => {
 
   const fetchAvailableRooms = async (checkIn, checkOut, excludeRoomId = null) => {
     try {
-      if (!checkIn || !checkOut) return;
-      if (new Date(checkOut) <= new Date(checkIn)) return;
+      if (!checkIn || !checkOut) {
+        setAvailableRooms([]);
+        return;
+      }
+      
+      const checkInDate = new Date(checkIn);
+      const checkOutDate = new Date(checkOut);
+      
+      if (checkOutDate <= checkInDate) {
+        setAvailableRooms([]);
+        return;
+      }
 
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
+      // Format dates as ISO string without timezone for backend
+      const checkInISO = checkInDate.toISOString().split('T')[0];
+      const checkOutISO = checkOutDate.toISOString().split('T')[0];
+      
       const response = await fetch(
-        `${API_BASE_URL}/rooms/available?checkIn=${checkIn}&checkOut=${checkOut}`,
+        `${API_BASE_URL}/rooms/available?checkIn=${checkInISO}&checkOut=${checkOutISO}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
       if (!response.ok) throw new Error('Failed to fetch available rooms');
       
       const data = await response.json();
-      let filteredRooms = data;
+      let filteredRooms = data || [];
       
+      // Include the current room if editing
       if (excludeRoomId) {
         const currentRoom = rooms.find(r => r._id === excludeRoomId);
         if (currentRoom) {
-          filteredRooms = [currentRoom, ...data.filter(room => room._id !== excludeRoomId)];
+          // Remove duplicates
+          const otherRooms = filteredRooms.filter(room => room._id !== excludeRoomId);
+          filteredRooms = [currentRoom, ...otherRooms];
         }
       }
       
       setAvailableRooms(filteredRooms);
     } catch (err) {
-      setError(err.message || "Failed to check availability");
+      console.error('Error fetching available rooms:', err);
+      setAvailableRooms([]);
     }
   };
 
@@ -133,9 +164,15 @@ const BookingsPage = () => {
     if (!formData.room) errors.room = "Room is required";
     if (!formData.checkIn) errors.checkIn = "Check-in date is required";
     if (!formData.checkOut) errors.checkOut = "Check-out date is required";
-    if (formData.checkIn && formData.checkOut && new Date(formData.checkOut) <= new Date(formData.checkIn)) {
-      errors.checkOut = "Check-out must be after check-in";
+    
+    if (formData.checkIn && formData.checkOut) {
+      const checkInDate = new Date(formData.checkIn);
+      const checkOutDate = new Date(formData.checkOut);
+      if (checkOutDate <= checkInDate) {
+        errors.checkOut = "Check-out must be after check-in";
+      }
     }
+    
     if (!formData.adults || formData.adults < 1) errors.adults = "At least 1 adult is required";
 
     setValidationErrors(errors);
@@ -144,10 +181,21 @@ const BookingsPage = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const newFormData = { ...formData, [name]: value };
+    setFormData(newFormData);
     
+    // Clear validation error for this field
     if (validationErrors[name]) {
       setValidationErrors(prev => ({ ...prev, [name]: null }));
+    }
+    
+    // If check-in or check-out dates change, fetch available rooms
+    if ((name === 'checkIn' || name === 'checkOut') && newFormData.checkIn && newFormData.checkOut) {
+      fetchAvailableRooms(
+        newFormData.checkIn, 
+        newFormData.checkOut, 
+        isEditing ? newFormData.room : null
+      );
     }
   };
 
@@ -158,12 +206,35 @@ const BookingsPage = () => {
     if (!validateForm()) return;
 
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
       const url = isEditing 
         ? `${API_BASE_URL}/bookings/${selectedBooking._id}`
         : `${API_BASE_URL}/bookings`;
       
       const method = isEditing ? 'PUT' : 'POST';
+
+      // Calculate total price if creating new booking
+      let totalPrice = formData.totalPrice;
+      if (!isEditing && formData.room) {
+        const selectedRoom = rooms.find(room => room._id === formData.room);
+        if (selectedRoom && formData.checkIn && formData.checkOut) {
+          const nights = Math.ceil(
+            (new Date(formData.checkOut) - new Date(formData.checkIn)) / 
+            (1000 * 60 * 60 * 24)
+          );
+          totalPrice = nights * selectedRoom.price;
+        }
+      }
+
+      const requestData = {
+        ...formData,
+        adults: parseInt(formData.adults),
+        children: parseInt(formData.children),
+        specialRequests: formData.specialRequests,
+        totalPrice: totalPrice
+      };
 
       const response = await fetch(url, {
         method,
@@ -171,24 +242,23 @@ const BookingsPage = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({
-          ...formData,
-          adults: parseInt(formData.adults),
-          children: parseInt(formData.children),
-          specialRequests: formData.specialRequests
-        })
+        body: JSON.stringify(requestData)
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to save booking');
+        throw new Error(errorData.error || `Failed to ${isEditing ? 'update' : 'create'} booking`);
       }
 
+      const result = await response.json();
+      console.log('Booking saved:', result);
+      
       await fetchData();
       resetForm();
       setError("");
     } catch (err) {
       setError(err.message);
+      console.error('Error saving booking:', err);
     }
   };
 
@@ -213,16 +283,18 @@ const BookingsPage = () => {
     setIsEditing(true);
     setShowForm(true);
     setFormData({
-      room: booking.room._id,
-      guest: booking.guest._id,
+      room: booking.room?._id || "",
+      guest: booking.guest?._id || "",
       checkIn: new Date(booking.checkIn).toISOString().split('T')[0],
       checkOut: new Date(booking.checkOut).toISOString().split('T')[0],
-      adults: booking.adults,
+      adults: booking.adults || 1,
       children: booking.children || 0,
-      specialRequests: booking.specialRequests || []
+      specialRequests: booking.specialRequests || [],
+      totalPrice: booking.totalPrice || 0
     });
     
-    fetchAvailableRooms(booking.checkIn, booking.checkOut, booking.room._id);
+    // Fetch available rooms for the current dates
+    fetchAvailableRooms(booking.checkIn, booking.checkOut, booking.room?._id);
   };
 
   const confirmDeleteBooking = (booking) => {
@@ -234,7 +306,9 @@ const BookingsPage = () => {
     if (!bookingToDelete) return;
     
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
       const response = await fetch(`${API_BASE_URL}/bookings/${bookingToDelete._id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
@@ -255,7 +329,9 @@ const BookingsPage = () => {
 
   const handleCheckIn = async (bookingId) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
       const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}/checkin`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
@@ -275,7 +351,9 @@ const BookingsPage = () => {
 
   const handleCheckOut = async (bookingId) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
       const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}/checkout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
@@ -295,7 +373,9 @@ const BookingsPage = () => {
 
   const handleCancelBooking = async (bookingId) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = getAuthToken();
+      if (!token) return;
+
       const response = await fetch(`${API_BASE_URL}/bookings/${bookingId}/cancel`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
@@ -324,7 +404,8 @@ const BookingsPage = () => {
       checkOut: "",
       adults: 1,
       children: 0,
-      specialRequests: []
+      specialRequests: [],
+      totalPrice: 0
     });
     setAvailableRooms([]);
     setValidationErrors({});
@@ -386,7 +467,7 @@ const BookingsPage = () => {
       <div className="flex justify-between items-start mb-3">
         <div>
           <p className="font-semibold text-gray-900">
-            {booking.guest?.firstName} {booking.guest?.lastName}
+            {booking.guest?.firstName || 'Guest'} {booking.guest?.lastName || ''}
           </p>
           <p className="text-sm text-gray-500 font-mono">
             #{booking._id?.slice(-6) || 'N/A'}
@@ -400,13 +481,13 @@ const BookingsPage = () => {
       <div className="space-y-2 mb-4">
         <div className="flex items-center text-sm text-gray-600">
           <Home className="mr-2 flex-shrink-0" size={16} />
-          <span>Room #{booking.room?.room_number} - {booking.room?.type}</span>
+          <span>Room #{booking.room?.room_number || 'N/A'} - {booking.room?.type || 'N/A'}</span>
         </div>
         <div className="flex items-center text-sm text-gray-600">
           <Calendar className="mr-2 flex-shrink-0" size={16} />
           <span>
-            {new Date(booking.checkIn).toLocaleDateString()} - {" "}
-            {new Date(booking.checkOut).toLocaleDateString()}
+            {booking.checkIn ? new Date(booking.checkIn).toLocaleDateString() : 'N/A'} - {" "}
+            {booking.checkOut ? new Date(booking.checkOut).toLocaleDateString() : 'N/A'}
           </span>
         </div>
         <div className="flex items-center text-sm text-gray-600">
@@ -415,7 +496,7 @@ const BookingsPage = () => {
         </div>
         <div className="flex items-center text-sm text-gray-600">
           <Users className="mr-2 flex-shrink-0" size={16} />
-          <span>{booking.adults} adults</span>
+          <span>{booking.adults || 0} adults</span>
           {booking.children > 0 && (
             <span className="ml-2 flex items-center">
               <Baby className="mr-1" size={14} />
@@ -664,10 +745,11 @@ const BookingsPage = () => {
             </div>
             <button
               onClick={() => {
-                setShowForm(!showForm);
-                setError("");
-                setValidationErrors({});
-                if (showForm) {
+                if (!showForm) {
+                  setShowForm(true);
+                  setError("");
+                  setValidationErrors({});
+                } else {
                   resetForm();
                 }
               }}
@@ -753,7 +835,7 @@ const BookingsPage = () => {
                         required
                       >
                         <option value="">Select Guest</option>
-                        {guests.map((guest) => (
+                        {Array.isArray(guests) && guests.map((guest) => (
                           <option key={guest._id} value={guest._id}>
                             {guest.firstName} {guest.lastName} ({guest.email})
                           </option>
@@ -778,15 +860,8 @@ const BookingsPage = () => {
                         name="checkIn"
                         type="date"
                         value={formData.checkIn}
-                        onChange={(e) => {
-                          handleInputChange(e);
-                          if (formData.checkOut)
-                            fetchAvailableRooms(
-                              e.target.value,
-                              formData.checkOut,
-                              isEditing ? formData.room : null
-                            );
-                        }}
+                        onChange={handleInputChange}
+                        min={new Date().toISOString().split('T')[0]}
                         className={`pl-10 w-full p-2.5 border ${
                           validationErrors.checkIn
                             ? "border-red-500"
@@ -813,15 +888,8 @@ const BookingsPage = () => {
                         name="checkOut"
                         type="date"
                         value={formData.checkOut}
-                        onChange={(e) => {
-                          handleInputChange(e);
-                          if (formData.checkIn)
-                            fetchAvailableRooms(
-                              formData.checkIn,
-                              e.target.value,
-                              isEditing ? formData.room : null
-                            );
-                        }}
+                        onChange={handleInputChange}
+                        min={formData.checkIn || new Date().toISOString().split('T')[0]}
                         className={`pl-10 w-full p-2.5 border ${
                           validationErrors.checkOut
                             ? "border-red-500"
@@ -992,7 +1060,7 @@ const BookingsPage = () => {
                   <button
                     type="submit"
                     className="w-full sm:w-auto min-w-[200px] px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 font-medium"
-                    disabled={!formData.room}
+                    disabled={!formData.room || !formData.guest || !formData.checkIn || !formData.checkOut}
                   >
                     {isEditing ? "Update Booking" : "Create Booking"}
                   </button>
@@ -1078,11 +1146,11 @@ const BookingsPage = () => {
                         <td className="px-6 py-4 text-sm text-gray-900">
                           <div className="flex flex-col">
                             <span>
-                              {new Date(booking.checkIn).toLocaleDateString()}
+                              {booking.checkIn ? new Date(booking.checkIn).toLocaleDateString() : 'N/A'}
                             </span>
                             <span className="text-xs text-gray-400">to</span>
                             <span>
-                              {new Date(booking.checkOut).toLocaleDateString()}
+                              {booking.checkOut ? new Date(booking.checkOut).toLocaleDateString() : 'N/A'}
                             </span>
                           </div>
                         </td>
@@ -1090,7 +1158,7 @@ const BookingsPage = () => {
                           <div className="flex items-center gap-2">
                             <span className="flex items-center">
                               <Users className="mr-1" size={12} />
-                              {booking.adults}
+                              {booking.adults || 0}
                             </span>
                             {booking.children > 0 && (
                               <span className="flex items-center">
@@ -1206,4 +1274,4 @@ const BookingsPage = () => {
   );
 };
 
-export default BookingsPage;  
+export default BookingsPage;
